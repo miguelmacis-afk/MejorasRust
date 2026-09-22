@@ -32,10 +32,8 @@ jobs:
           chmod +x depotdownloader/DepotDownloader
 
       - name: Descargar Bundles de Rust Staging (AppID 258550)
-        # Descarga de forma anónima (-beta public) de la rama staging
-        # Filtra solo los bundles para que tarde menos de 10 minutos
         run: |
-          ./depotdownloader/DepotDownloader -app 258550 -dir rust_staging -filematching "*.bundle"
+          ./depotdownloader/DepotDownloader -app 258550 -dir rust_staging -filematching "*.bundle" -max-downloads 2 -max-servers 2 -validate
 
       - name: Ejecutar Dataminer (Extraer y notificar a Discord)
         env:
