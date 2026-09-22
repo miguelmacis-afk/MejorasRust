@@ -25,15 +25,15 @@ jobs:
       - name: Instalar librerías de Python
         run: pip install UnityPy requests Pillow
 
-      - name: Descargar e instalar DepotDownloader
+      - name: Descargar e instalar SteamCMD
         run: |
-          wget https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_2.7.3/DepotDownloader-linux-x64.zip
-          unzip DepotDownloader-linux-x64.zip -d depotdownloader
-          chmod +x depotdownloader/DepotDownloader
+          mkdir steamcmd
+          cd steamcmd
+          curl -sqL "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz" | tar zxvf -
 
-      - name: Descargar Bundles de Rust Staging (AppID 258550)
+      - name: Descargar Rust Staging (AppID 258550) via SteamCMD
         run: |
-          ./depotdownloader/DepotDownloader -app 258550 -dir rust_staging -filematching "*.bundle" -max-downloads 2 -max-servers 2 -validate
+          ./steamcmd/steamcmd.sh +force_install_dir ${{ github.workspace }}/rust_staging +login anonymous +app_update 258550 -beta staging validate +quit
 
       - name: Ejecutar Dataminer (Extraer y notificar a Discord)
         env:
