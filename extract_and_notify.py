@@ -54,9 +54,18 @@ def main():
     vistos = load_state()
     nuevos_encontrados = 0
 
-    print("Cargando archivos de Unity...")
-    # Carga todos los bundles descargados en la carpeta
-    env = UnityPy.load(RUST_DIR)
+    print("Buscando archivos de Unity (.bundle y .assets)...")
+    
+    # OPTIMIZACIÓN: Buscar solo los archivos empaquetados para no saturar la RAM y tardar menos de 10 min
+    archivos_unity = []
+    for root, dirs, files in os.walk(RUST_DIR):
+        for file in files:
+            if file.endswith(".bundle") or file.endswith(".assets"):
+                archivos_unity.append(os.path.join(root, file))
+
+    print(f"Se encontraron {len(archivos_unity)} archivos de Unity. Cargando...")
+    # Carga exclusivamente los archivos de assets en lugar de toda la carpeta
+    env = UnityPy.load(*archivos_unity)
 
     for obj in env.objects:
         # Solo nos interesan las texturas/imágenes para este ejemplo
@@ -64,23 +73,25 @@ def main():
             data = obj.read()
             name = data.name
             
-            # Filtramos para no sacar cientos de texturas irrelevantes, 
-            # nos centramos en shortnames de ítems o íconos de UI
+            # Filtramos basándonos en los shortnames habituales de Rust
             if name and ("icon" in name.lower() or "item" in name.lower()):
                 if name not in vistos:
                     print(f"Nuevo asset encontrado: {name}")
                     
-                    # Extraer imagen
-                    img = data.image
-                    img_byte_arr = BytesIO()
-                    img.save(img_byte_arr, format='PNG')
-                    
-                    # Enviar a Discord
-                    send_to_discord(name, img_byte_arr.getvalue())
-                    
-                    # Añadir a la base de datos local
-                    vistos.add(name)
-                    nuevos_encontrados += 1
+                    try:
+                        # Extraer imagen
+                        img = data.image
+                        img_byte_arr = BytesIO()
+                        img.save(img_byte_arr, format='PNG')
+                        
+                        # Enviar a Discord
+                        send_to_discord(name, img_byte_arr.getvalue())
+                        
+                        # Añadir a la base de datos local
+                        vistos.add(name)
+                        nuevos_encontrados += 1
+                    except Exception as e:
+                        print(f"Error procesando la imagen {name}: {e}")
                     
                     # Límite por ejecución (para no superar el tiempo ni spamear)
                     if nuevos_encontrados >= 10:
