@@ -11,8 +11,13 @@ RUST_DIR = "rust_staging"
 
 def load_state():
     if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return set(json.load(f))
+        try:
+            with open(STATE_FILE, "r") as f:
+                return set(json.load(f))
+        except json.JSONDecodeError:
+            # Si el archivo está vacío o corrupto por un crasheo anterior, empezamos de cero
+            print(f"Advertencia: El archivo {STATE_FILE} estaba corrupto o vacío. Iniciando lista limpia.")
+            return set()
     return set()
 
 def save_state(state):
@@ -71,7 +76,7 @@ def main():
         if obj.type.name in ["Texture2D", "Sprite"]:
             data = obj.read()
             
-            # SOLUCIÓN: Usar getattr para evitar el crasheo si el objeto no tiene la propiedad 'name'
+            # Usar getattr para evitar el crasheo si el objeto no tiene la propiedad 'name'
             name = getattr(data, "name", getattr(data, "m_Name", None))
             
             if name and ("icon" in name.lower() or "item" in name.lower()):
