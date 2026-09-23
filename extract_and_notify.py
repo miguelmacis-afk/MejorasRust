@@ -1,5 +1,6 @@
 import os
 import json
+import time
 import requests
 import UnityPy
 from io import BytesIO
@@ -75,7 +76,6 @@ def main():
 
     vistos = load_state()
     is_first_run = len(vistos) == 0
-    nuevos_encontrados = 0
 
     print("Buscando archivos de Unity (.bundle y .assets)...")
     if is_first_run:
@@ -90,6 +90,8 @@ def main():
 
     print(f"Se encontraron {len(archivos_unity)} archivos de Unity. Cargando...")
     env = UnityPy.load(*archivos_unity)
+
+    nuevos_encontrados_lote = 0
 
     for obj in env.objects:
         # Buscamos Imágenes (Texture2D/Sprite), Modelos 3D (GameObject) y Sonidos (AudioClip)
@@ -127,13 +129,16 @@ def main():
                             send_to_discord(name, obj.type.name, None)
                         
                         vistos.add(name)
-                        nuevos_encontrados += 1
+                        nuevos_encontrados_lote += 1
                     except Exception as e:
                         print(f"Error procesando {name}: {e}")
                     
-                    if nuevos_encontrados >= 10:
-                        print("Límite de 10 alertas alcanzado.")
-                        break
+                    # Si llega a 10 alertas, guardamos progreso, esperamos 1 min y continuamos
+                    if nuevos_encontrados_lote >= 10:
+                        save_state(vistos) # Guardamos para no perder el progreso si se corta
+                        print("Lote de 10 alertas alcanzado. Esperando 60 segundos para evitar saturar el Webhook de Discord...")
+                        time.sleep(60)
+                        nuevos_encontrados_lote = 0 # Reiniciamos el contador del lote
 
     save_state(vistos)
     
