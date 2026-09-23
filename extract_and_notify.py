@@ -23,12 +23,21 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(list(state), f)
 
-def send_to_discord(name, img_bytes=None):
+def send_to_discord(name, asset_type, img_bytes=None):
+    # Definir descripción según el tipo de asset
+    desc_text = "Se ha añadido un nuevo recurso a la rama Staging."
+    if asset_type == "AudioClip":
+        desc_text = "🔊 Se ha detectado un nuevo archivo de sonido/audio."
+    elif asset_type == "GameObject":
+        desc_text = "📦 Se ha detectado un nuevo modelo 3D / Prefab."
+    elif asset_type in ["Texture2D", "Sprite"]:
+        desc_text = "🖼️ Se ha detectado una nueva textura o icono."
+
     # Formato elegante del Embed para nuevos assets
     payload = {
         "embeds": [{
             "title": f"🆕 Nuevo Asset Detectado: `{name}`",
-            "description": "Se ha añadido un nuevo recurso o modelo a la rama Staging.",
+            "description": desc_text,
             "color": 8302335, # Color azul verdoso
             "footer": {"text": "Rust Staging Dataminer • GitHub Actions"}
         }]
@@ -52,7 +61,7 @@ def send_initialization_message(count):
     payload = {
         "embeds": [{
             "title": "✅ Dataminer Inicializado",
-            "description": f"Se ha creado la base de datos inicial con **{count}** assets existentes de Rust.\n\nEl bot está al día. A partir de ahora, solo recibirás notificaciones cuando los desarrolladores añadan contenido nuevo.",
+            "description": f"Se ha creado la base de datos inicial con **{count}** assets existentes de Rust (incluyendo iconos, prefabs y sonidos).\n\nEl bot está al día. A partir de ahora, solo recibirás notificaciones cuando los desarrolladores añadan contenido nuevo.",
             "color": 3066993, # Color verde
             "footer": {"text": "Rust Staging Dataminer • GitHub Actions"}
         }]
@@ -83,8 +92,8 @@ def main():
     env = UnityPy.load(*archivos_unity)
 
     for obj in env.objects:
-        # Buscamos Imágenes (Texture2D/Sprite) y Modelos 3D (GameObject)
-        if obj.type.name in ["Texture2D", "Sprite", "GameObject"]:
+        # Buscamos Imágenes (Texture2D/Sprite), Modelos 3D (GameObject) y Sonidos (AudioClip)
+        if obj.type.name in ["Texture2D", "Sprite", "GameObject", "AudioClip"]:
             data = obj.read()
             name = getattr(data, "name", getattr(data, "m_Name", None))
             
@@ -97,22 +106,25 @@ def main():
             # Filtro 2: Prefabs de cosas importantes en Rust (animales, NPCs, armas, vehículos, monumentos)
             is_prefab = obj.type.name == "GameObject" and any(keyword in name.lower() for keyword in ["npc", "animal", "monument", "vehicle", "weapon"])
 
-            if (is_icon or is_prefab) and name not in vistos:
+            # Filtro 3: Nuevos sonidos y audios
+            is_audio = obj.type.name == "AudioClip" and any(keyword in name.lower() for keyword in ["sound", "audio", "weapon", "fx", "music", "vo", "ambient"])
+
+            if (is_icon or is_prefab or is_audio) and name not in vistos:
                 if is_first_run:
                     # Modo Inicialización: Lo guardamos rapidísimo
                     vistos.add(name)
                 else:
                     # Modo Normal: Extraer y notificar
-                    print(f"Novedad encontrada: {name}")
+                    print(f"Novedad encontrada ({obj.type.name}): {name}")
                     try:
                         if is_icon:
                             img = data.image
                             img_byte_arr = BytesIO()
                             img.save(img_byte_arr, format='PNG')
-                            send_to_discord(name, img_byte_arr.getvalue())
+                            send_to_discord(name, obj.type.name, img_byte_arr.getvalue())
                         else:
-                            # Modelo 3D, solo texto
-                            send_to_discord(name, None)
+                            # Modelo 3D o Audio, solo texto
+                            send_to_discord(name, obj.type.name, None)
                         
                         vistos.add(name)
                         nuevos_encontrados += 1
