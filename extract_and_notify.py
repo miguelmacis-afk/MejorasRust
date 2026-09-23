@@ -23,22 +23,23 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(list(state), f)
 
-def send_to_discord(name, img_bytes):
+def send_to_discord(name, img_bytes=None):
     # Formato elegante del Embed para nuevos assets
     payload = {
         "embeds": [{
             "title": f"🆕 Nuevo Asset Detectado: `{name}`",
-            "description": "Se ha añadido un nuevo recurso a la rama Staging.",
+            "description": "Se ha añadido un nuevo recurso o modelo a la rama Staging.",
             "color": 8302335, # Color azul verdoso
             "footer": {"text": "Rust Staging Dataminer • GitHub Actions"}
         }]
     }
     
-    files = {
-        "file": (f"{name}.png", img_bytes, "image/png")
-    }
-    
-    payload["embeds"][0]["thumbnail"] = {"url": f"attachment://{name}.png"}
+    files = None
+    if img_bytes:
+        files = {
+            "file": (f"{name}.png", img_bytes, "image/png")
+        }
+        payload["embeds"][0]["thumbnail"] = {"url": f"attachment://{name}.png"}
     
     response = requests.post(WEBHOOK_URL, data={"payload_json": json.dumps(payload)}, files=files)
     
@@ -48,7 +49,6 @@ def send_to_discord(name, img_bytes):
         print(f"Error al enviar {name}: {response.status_code}")
 
 def send_initialization_message(count):
-    # Mensaje único para avisarte de que la primera pasada ha terminado
     payload = {
         "embeds": [{
             "title": "✅ Dataminer Inicializado",
@@ -65,7 +65,7 @@ def main():
         return
 
     vistos = load_state()
-    is_first_run = len(vistos) == 0 # Detectamos si es la primera ejecución
+    is_first_run = len(vistos) == 0
     nuevos_encontrados = 0
 
     print("Buscando archivos de Unity (.bundle y .assets)...")
@@ -83,36 +83,48 @@ def main():
     env = UnityPy.load(*archivos_unity)
 
     for obj in env.objects:
-        if obj.type.name in ["Texture2D", "Sprite"]:
+        # Buscamos Imágenes (Texture2D/Sprite) y Modelos 3D (GameObject)
+        if obj.type.name in ["Texture2D", "Sprite", "GameObject"]:
             data = obj.read()
             name = getattr(data, "name", getattr(data, "m_Name", None))
             
-            if name and ("icon" in name.lower() or "item" in name.lower()):
-                if name not in vistos:
-                    if is_first_run:
-                        # Modo Inicialización: Lo guardamos en memoria rapidísimo, sin enviar imágenes
-                        vistos.add(name)
-                    else:
-                        # Modo Normal (ejecuciones futuras): Extraer y notificar
-                        print(f"Nuevo asset encontrado: {name}")
-                        try:
+            if not name:
+                continue
+
+            # Filtro 1: Imágenes de iconos e ítems
+            is_icon = obj.type.name in ["Texture2D", "Sprite"] and ("icon" in name.lower() or "item" in name.lower())
+            
+            # Filtro 2: Prefabs de cosas importantes en Rust (animales, NPCs, armas, vehículos, monumentos)
+            is_prefab = obj.type.name == "GameObject" and any(keyword in name.lower() for keyword in ["npc", "animal", "monument", "vehicle", "weapon"])
+
+            if (is_icon or is_prefab) and name not in vistos:
+                if is_first_run:
+                    # Modo Inicialización: Lo guardamos rapidísimo
+                    vistos.add(name)
+                else:
+                    # Modo Normal: Extraer y notificar
+                    print(f"Novedad encontrada: {name}")
+                    try:
+                        if is_icon:
                             img = data.image
                             img_byte_arr = BytesIO()
                             img.save(img_byte_arr, format='PNG')
-                            
                             send_to_discord(name, img_byte_arr.getvalue())
-                            vistos.add(name)
-                            nuevos_encontrados += 1
-                        except Exception as e:
-                            print(f"Error procesando la imagen {name}: {e}")
+                        else:
+                            # Modelo 3D, solo texto
+                            send_to_discord(name, None)
                         
-                        if nuevos_encontrados >= 10:
-                            print("Límite de 10 assets alcanzado.")
-                            break
+                        vistos.add(name)
+                        nuevos_encontrados += 1
+                    except Exception as e:
+                        print(f"Error procesando {name}: {e}")
+                    
+                    if nuevos_encontrados >= 10:
+                        print("Límite de 10 alertas alcanzado.")
+                        break
 
     save_state(vistos)
     
-    # Si fue la primera ejecución, mandamos el aviso de que ya terminó de escanear todo
     if is_first_run:
         print(f"Inicialización completada. {len(vistos)} assets registrados.")
         send_initialization_message(len(vistos))
