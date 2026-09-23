@@ -56,7 +56,6 @@ def main():
 
     print("Buscando archivos de Unity (.bundle y .assets)...")
     
-    # OPTIMIZACIÓN: Buscar solo los archivos empaquetados para no saturar la RAM y tardar menos de 10 min
     archivos_unity = []
     for root, dirs, files in os.walk(RUST_DIR):
         for file in files:
@@ -64,16 +63,17 @@ def main():
                 archivos_unity.append(os.path.join(root, file))
 
     print(f"Se encontraron {len(archivos_unity)} archivos de Unity. Cargando...")
-    # Carga exclusivamente los archivos de assets en lugar de toda la carpeta
+    # Carga exclusivamente los archivos de assets
     env = UnityPy.load(*archivos_unity)
 
     for obj in env.objects:
-        # Solo nos interesan las texturas/imágenes para este ejemplo
-        if obj.type.name == "Texture2D":
+        # Los íconos pueden guardarse como Texture2D o Sprite en Unity
+        if obj.type.name in ["Texture2D", "Sprite"]:
             data = obj.read()
-            name = data.name
             
-            # Filtramos basándonos en los shortnames habituales de Rust
+            # SOLUCIÓN: Usar getattr para evitar el crasheo si el objeto no tiene la propiedad 'name'
+            name = getattr(data, "name", getattr(data, "m_Name", None))
+            
             if name and ("icon" in name.lower() or "item" in name.lower()):
                 if name not in vistos:
                     print(f"Nuevo asset encontrado: {name}")
@@ -93,7 +93,7 @@ def main():
                     except Exception as e:
                         print(f"Error procesando la imagen {name}: {e}")
                     
-                    # Límite por ejecución (para no superar el tiempo ni spamear)
+                    # Límite por ejecución (para no superar los 10 minutos ni spamear)
                     if nuevos_encontrados >= 10:
                         print("Límite de 10 assets alcanzado. El resto se procesará en la próxima ejecución.")
                         break
