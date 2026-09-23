@@ -15,7 +15,6 @@ def load_state():
             with open(STATE_FILE, "r") as f:
                 return set(json.load(f))
         except json.JSONDecodeError:
-            # Si el archivo está vacío o corrupto por un crasheo anterior, empezamos de cero
             print(f"Advertencia: El archivo {STATE_FILE} estaba corrupto o vacío. Iniciando lista limpia.")
             return set()
     return set()
@@ -25,25 +24,22 @@ def save_state(state):
         json.dump(list(state), f)
 
 def send_to_discord(name, img_bytes):
-    # Formato elegante del Embed (Color verde Rust)
+    # Formato elegante del Embed para nuevos assets
     payload = {
         "embeds": [{
             "title": f"🆕 Nuevo Asset Detectado: `{name}`",
             "description": "Se ha añadido un nuevo recurso a la rama Staging.",
-            "color": 8302335, # Color verde/azulado
+            "color": 8302335, # Color azul verdoso
             "footer": {"text": "Rust Staging Dataminer • GitHub Actions"}
         }]
     }
     
-    # Preparamos la imagen para adjuntarla
     files = {
         "file": (f"{name}.png", img_bytes, "image/png")
     }
     
-    # Vinculamos la imagen adjunta al embed
     payload["embeds"][0]["thumbnail"] = {"url": f"attachment://{name}.png"}
     
-    # Enviamos la petición a Discord multipart/form-data
     response = requests.post(WEBHOOK_URL, data={"payload_json": json.dumps(payload)}, files=files)
     
     if response.status_code in (200, 204):
@@ -51,15 +47,31 @@ def send_to_discord(name, img_bytes):
     else:
         print(f"Error al enviar {name}: {response.status_code}")
 
+def send_initialization_message(count):
+    # Mensaje único para avisarte de que la primera pasada ha terminado
+    payload = {
+        "embeds": [{
+            "title": "✅ Dataminer Inicializado",
+            "description": f"Se ha creado la base de datos inicial con **{count}** assets existentes de Rust.\n\nEl bot está al día. A partir de ahora, solo recibirás notificaciones cuando los desarrolladores añadan contenido nuevo.",
+            "color": 3066993, # Color verde
+            "footer": {"text": "Rust Staging Dataminer • GitHub Actions"}
+        }]
+    }
+    requests.post(WEBHOOK_URL, json=payload)
+
 def main():
     if not WEBHOOK_URL:
         print("Error: DISCORD_WEBHOOK no está configurado.")
         return
 
     vistos = load_state()
+    is_first_run = len(vistos) == 0 # Detectamos si es la primera ejecución
     nuevos_encontrados = 0
 
     print("Buscando archivos de Unity (.bundle y .assets)...")
+    if is_first_run:
+        print("--- MODO INICIALIZACIÓN ---")
+        print("Se registrarán todos los assets actuales sin enviarlos a Discord para evitar spam y ahorrar tiempo.")
     
     archivos_unity = []
     for root, dirs, files in os.walk(RUST_DIR):
@@ -68,42 +80,42 @@ def main():
                 archivos_unity.append(os.path.join(root, file))
 
     print(f"Se encontraron {len(archivos_unity)} archivos de Unity. Cargando...")
-    # Carga exclusivamente los archivos de assets
     env = UnityPy.load(*archivos_unity)
 
     for obj in env.objects:
-        # Los íconos pueden guardarse como Texture2D o Sprite en Unity
         if obj.type.name in ["Texture2D", "Sprite"]:
             data = obj.read()
-            
-            # Usar getattr para evitar el crasheo si el objeto no tiene la propiedad 'name'
             name = getattr(data, "name", getattr(data, "m_Name", None))
             
             if name and ("icon" in name.lower() or "item" in name.lower()):
                 if name not in vistos:
-                    print(f"Nuevo asset encontrado: {name}")
-                    
-                    try:
-                        # Extraer imagen
-                        img = data.image
-                        img_byte_arr = BytesIO()
-                        img.save(img_byte_arr, format='PNG')
-                        
-                        # Enviar a Discord
-                        send_to_discord(name, img_byte_arr.getvalue())
-                        
-                        # Añadir a la base de datos local
+                    if is_first_run:
+                        # Modo Inicialización: Lo guardamos en memoria rapidísimo, sin enviar imágenes
                         vistos.add(name)
-                        nuevos_encontrados += 1
-                    except Exception as e:
-                        print(f"Error procesando la imagen {name}: {e}")
-                    
-                    # Límite por ejecución (para no superar los 10 minutos ni spamear)
-                    if nuevos_encontrados >= 10:
-                        print("Límite de 10 assets alcanzado. El resto se procesará en la próxima ejecución.")
-                        break
+                    else:
+                        # Modo Normal (ejecuciones futuras): Extraer y notificar
+                        print(f"Nuevo asset encontrado: {name}")
+                        try:
+                            img = data.image
+                            img_byte_arr = BytesIO()
+                            img.save(img_byte_arr, format='PNG')
+                            
+                            send_to_discord(name, img_byte_arr.getvalue())
+                            vistos.add(name)
+                            nuevos_encontrados += 1
+                        except Exception as e:
+                            print(f"Error procesando la imagen {name}: {e}")
+                        
+                        if nuevos_encontrados >= 10:
+                            print("Límite de 10 assets alcanzado.")
+                            break
 
     save_state(vistos)
+    
+    # Si fue la primera ejecución, mandamos el aviso de que ya terminó de escanear todo
+    if is_first_run:
+        print(f"Inicialización completada. {len(vistos)} assets registrados.")
+        send_initialization_message(len(vistos))
 
 if __name__ == "__main__":
     main()
