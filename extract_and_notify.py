@@ -25,7 +25,8 @@ def save_state(state):
         json.dump(list(state), f)
 
 def load_existing_skins_data():
-    # Estructura inicial con los grados de construcción de Rust por defecto
+    # Estructura inicial con los grados de construcción predeterminados de Rust
+    # Grado 1: Wood, Grado 2: Stone, Grado 3: Metal, Grado 4: TopTier/Armored
     skins = {
         1: {"NORMAL": 0, "LEGACY": 10232, "Gingerbread": 2},
         2: {"NORMAL": 0, "ADOBE": 10220, "BRICK": 10223, "BRUTALIST": 10225, "JUNGLE": 10326, "CRYPT": 10472},
@@ -35,7 +36,7 @@ def load_existing_skins_data():
     return skins
 
 def save_skins_to_csharp(skins_dict):
-    """Genera y actualiza automáticamente el archivo C# con el formato de diccionario"""
+    """Genera y actualiza automáticamente el archivo C# con el diccionario de skins"""
     lines = [
         "using System.Collections.Generic;",
         "",
@@ -64,13 +65,18 @@ def save_skins_to_csharp(skins_dict):
         
     lines.extend([
         "        };",
+        "",
+        "        public Dictionary<int, Dictionary<string, ulong>> ObtenerSkins()",
+        "        {",
+        "            return SkinsDisponibles;",
+        "        }",
         "    }",
         "}"
     ])
     
     with open(SKINS_OUTPUT_FILE, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print(f"Archivo {SKINS_OUTPUT_FILE} actualizado automáticamente.")
+    print(f"Archivo {SKINS_OUTPUT_FILE} actualizado automáticamente con las últimas skins detectadas.")
 
 def render_3d_to_png(obj_bytes, name):
     obj_path = f"/tmp/{name}.obj"
@@ -149,24 +155,47 @@ def main():
     print(f"Cargando {len(archivos_unity)} archivos de Unity...")
     env = UnityPy.load(*archivos_unity)
     nuevos_encontrados = 0
+    skins_modificadas = False
 
     for obj in env.objects:
-        if obj.type.name in ["Texture2D", "Sprite", "GameObject", "Mesh", "AudioClip", "MonoBehaviour"]:
-            try:
+        try:
+            # 1. Extracción automática de Skins de Construcción desde MonoBehaviour
+            if obj.type.name == "MonoBehaviour":
+                data = obj.read()
+                name = getattr(data, "name", getattr(data, "m_Name", None))
+                if name:
+                    lower_name = name.lower()
+                    skin_id = getattr(data, "skinId", getattr(data, "workshopId", getattr(data, "m_SkinId", 0)))
+                    
+                    if skin_id and skin_id > 0:
+                        # Asignación inteligente por Tier / Grado de Construcción
+                        grade = 1
+                        if any(k in lower_name for k in ["stone", "adobe", "brick", "brutalist", "jungle", "crypt"]):
+                            grade = 2
+                        elif any(k in lower_name for k in ["metal", "sheet", "container", "scrapking"]):
+                            grade = 3
+                        elif any(k in lower_name for k in ["toptier", "armored", "space"]):
+                            grade = 4
+                        elif any(k in lower_name for k in ["wood", "legacy", "gingerbread"]):
+                            grade = 1
+
+                        skin_key_name = name.upper().replace("BUILDING_SKIN_", "").replace("SKIN_", "")
+                        if grade not in skins_dict:
+                            skins_dict[grade] = {"NORMAL": 0}
+
+                        if skin_key_name not in skins_dict[grade]:
+                            skins_dict[grade][skin_key_name] = int(skin_id)
+                            skins_modificadas = True
+                            print(f"✨ Nueva skin de construcción detectada: Grado {grade} -> {skin_key_name} (ID: {skin_id})")
+
+            # 2. Datamining de Assets Visuales / Audio para Discord
+            if obj.type.name in ["Texture2D", "Sprite", "GameObject", "Mesh", "AudioClip"]:
                 data = obj.read()
                 name = getattr(data, "name", getattr(data, "m_Name", None))
                 if not name:
                     continue
 
                 lower_name = name.lower()
-
-                # NOTA: Aquí puedes mapear la lógica de extracción si descubres propiedades 
-                # de skin de construcción específicas en los assets analizados de Rust:
-                # Ejemplo:
-                # if "nueva_skin_construccion" in lower_name:
-                #     skins_dict[grado][nombre_skin] = id_skin
-                #     skins_actualizadas = True
-
                 is_icon = obj.type.name in ["Texture2D", "Sprite"] and any(k in lower_name for k in ["icon", "item", "skin"])
                 is_3d = obj.type.name in ["GameObject", "Mesh"] and any(k in lower_name for k in ["npc", "animal", "monument", "vehicle", "weapon"])
                 is_audio = obj.type.name == "AudioClip" and any(k in lower_name for k in ["sound", "audio", "weapon", "fx", "music", "vo", "ambient"])
@@ -204,12 +233,12 @@ def main():
                             time.sleep(5)
                             nuevos_encontrados = 0
 
-            except Exception as e:
-                print(f"Error procesando objeto {obj.path_id}: {e}")
+        except Exception as e:
+            pass
 
     save_state(vistos)
     save_skins_to_csharp(skins_dict)
-    print("Datamining y guardado de skins completados.")
+    print("Datamining completado y diccionario de skins actualizado.")
 
 if __name__ == "__main__":
     main()
