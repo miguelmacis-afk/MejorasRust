@@ -3,7 +3,7 @@ name: Rust Staging Dataminer
 on:
   schedule:
     # Se ejecuta en el minuto 0 de cada hora
-    - cron: '0 * * * *'
+    #- cron: '0 * * * *'
   workflow_dispatch: # Permite ejecutarlo manualmente desde GitHub
 
 jobs:
